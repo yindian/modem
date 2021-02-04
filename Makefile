@@ -1,6 +1,9 @@
 tests:
+	PYTHONPATH=. python3 test/test.py test/test.py
 	PYTHONPATH=. python test/test.py test/test.py
+	PYTHONPATH=. python3 test/test-recv.py
 	PYTHONPATH=. python test/test-recv.py
+	PYTHONPATH=. python3 test/test-send.py
 	PYTHONPATH=. python test/test-send.py
 
 upload:

@@ -23,8 +23,10 @@ ABORT_SEND_STREAM    = ABORT_WHY % _('stream send failed')
 DEBUG_RECV_CAN       = _('First <CAN> received')
 DEBUG_SEND_CAN       = _('First <CAN> sent')
 DEBUG_START_FILENAME = _('Start sending "%s"')
+DEBUG_START_FILE     = DEBUG_START_FILENAME
 DEBUG_TRY_CRC        = _('Try CRC mode')
 DEBUG_TRY_CHECKSUM   = _('Try check sum mode')
+DEBUG_SEND_EOT       = _('<EOT> sent')
 
 ERROR_EXPECT_NAK_CRC = ERROR_WHY % _('expected <NAK>/<CRC>, got "%02x"')
 ERROR_EXPECT_SOH_EOT = ERROR_WHY % _('expected <SOH>/<EOT>, got "%02x"')

@@ -3,6 +3,14 @@ from xmodem import error
 from xmodem.const import *
 from xmodem.tools import log
 
+def ord2(char):
+    if not char:
+        return -1
+    assert len(char) == 1
+    return bytearray(char)[0]
+
+def chr2(code):
+    return bytes(bytearray((code, )))
 
 class XMODEM(object):
     '''
@@ -30,7 +38,7 @@ class XMODEM(object):
         '''
         Send an abort sequence using CAN bytes.
         '''
-        for counter in xrange(0, count):
+        for counter in range(0, count):
             self.putc(CAN, timeout)
 
     def send(self, stream, retry=16, timeout=60, quiet=0):
@@ -65,7 +73,7 @@ class XMODEM(object):
                     else:
                         cancel = 1
                 else:
-                    log.error(error.ERROR_EXPECT_NAK_CRC % ord(char))
+                    log.error(error.ERROR_EXPECT_NAK_CRC % ord2(char))
 
             error_count += 1
             if error_count >= retry:
@@ -149,7 +157,7 @@ class XMODEM(object):
                     else:
                         cancel = 1
                 else:
-                    log.debug(error.DEBUG_EXPECT_SOH_EOT % ord(char))
+                    log.debug(error.DEBUG_EXPECT_SOH_EOT % ord2(char))
                     error_count += 1
                     if error_count >= retry:
                         self.abort()
@@ -158,8 +166,8 @@ class XMODEM(object):
             # read sequence
             error_count = 0
             cancel = 0
-            seq1 = ord(self.getc(1))
-            seq2 = 0xff - ord(self.getc(1))
+            seq1 = ord2(self.getc(1))
+            seq2 = 0xff - ord2(self.getc(1))
             if seq1 == sequence and seq2 == sequence:
                 # sequence is ok, read packet
                 # packet_size + checksum
@@ -193,7 +201,7 @@ class XMODEM(object):
             '0x3c'
 
         '''
-        return (sum(map(ord, data)) + checksum) % 256
+        return (sum(bytearray(data)) + checksum) % 256
 
     def calc_crc(self, data, crc=0):
         '''
@@ -206,8 +214,8 @@ class XMODEM(object):
             '0xd5e3'
 
         '''
-        for char in data:
-            crc = (crc << 8) ^ CRC_MAP[((crc >> 8) ^ ord(char)) & 0xff]
+        for char in bytearray(data):
+            crc = (crc << 8) ^ CRC_MAP[((crc >> 8) ^ char) & 0xff]
         return crc & 0xffff
 
     def _check_crc(self, data, crc_mode):
@@ -224,13 +232,14 @@ class XMODEM(object):
         or returns False in case of invalid checksum/CRC
         '''
         if crc_mode:
-            csum = (ord(data[-2]) << 8) + ord(data[-1])
+            _checksum = bytearray(data[-2:])
+            csum = (_checksum[0] << 8) + _checksum[1]
             data = data[:-2]
             mine = self.calc_crc(data)
             if csum == mine:
                 return data
         else:
-            csum = ord(data[-3])
+            csum = bytearray(data[-1:])[0]
             data = data[:-1]
             mine = self.calc_checksum(data)
             if csum == mine:
@@ -267,7 +276,7 @@ class XMODEM(object):
                 packet_size = (len(data) <= 128) and 128 or 1024
 
             # Align the packet
-            data = data.ljust(packet_size, '\x00')
+            data = data.ljust(packet_size, b'\x00')
 
             # Calculate CRC or checksum
             crc = crc_mode and self.calc_crc(data) or self.calc_checksum(data)
@@ -300,15 +309,15 @@ class XMODEM(object):
         start_char = SOH if packet_size == 128 else STX
         while True:
             self.putc(start_char)
-            self.putc(chr(sequence))
-            self.putc(chr(0xff - sequence))
+            self.putc(chr2(sequence))
+            self.putc(chr2(0xff - sequence))
             self.putc(data)
             if crc_mode:
-                self.putc(chr(crc >> 8))
-                self.putc(chr(crc & 0xff))
+                self.putc(chr2(crc >> 8))
+                self.putc(chr2(crc & 0xff))
             else:
                 # Send CRC or checksum
-                self.putc(chr(crc))
+                self.putc(chr2(crc))
 
             # Wait for the <ACK>
             char = self.getc(1, timeout)
@@ -402,7 +411,8 @@ class XMODEM(object):
         cancel = 0
         sequence = 1
         income_size = 0
-        self.putc(CRC)
+        self.putc(CRC if crc_mode else NAK)
+        first_ymodem = self.protocol == PROTOCOL_YMODEM
 
         char = self.getc(1, timeout)
         while True:
@@ -429,8 +439,8 @@ class XMODEM(object):
                     self.abort(timeout=timeout)
                     return False
 
-                seq1 = ord(self.getc(1))
-                seq2 = 0xff - ord(self.getc(1))
+                seq1 = ord2(self.getc(1))
+                seq2 = 0xff - ord2(self.getc(1))
 
                 if seq1 == sequence and seq2 == sequence:
                     data = self._check_crc(self.getc(packet_size + 1 + crc_mode),
@@ -442,6 +452,8 @@ class XMODEM(object):
                         stream.write(data)
                         self.putc(ACK)
                         sequence = (sequence + 1) % 0x100
+                        error_count = 0
+                        first_ymodem = False
 
                         # Waiting for new packet
                         char = self.getc(1, timeout)
@@ -450,7 +462,18 @@ class XMODEM(object):
                 # Sequence numbering is off or CRC is incorrect, request new
                 # packet
                 self.getc(packet_size + 1 + crc_mode)
-                self.putc(NAK)
+                if seq1 == seq2 and ((seq1 + 1) & 0xFF) == sequence:
+                    # already received
+                    self.putc(ACK)
+                    if first_ymodem:
+                        self.putc(CRC if crc_mode else NAK)
+                else:
+                    log.warn('recv error: purge, requesting retransmission (NAK)')
+                    while True:
+                        if self.getc(1, timeout=1) is None:
+                            break
+                    self.putc(NAK)
+                char = self.getc(1, timeout)
             elif char == EOT:
                 # We are done, acknowledge <EOT>
                 self.putc(ACK)
@@ -465,7 +488,7 @@ class XMODEM(object):
                     char = self.getc(1, timeout)
                     continue
             else:
-                log.debug(error.DEBUG_EXPECT_SOH_EOT % ord(char))
+                log.debug(error.DEBUG_EXPECT_SOH_EOT % ord2(char))
                 error_count += 1
                 if error_count >= retry:
                     log.error(error.ABORT_ERROR_LIMIT)

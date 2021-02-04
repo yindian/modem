@@ -1,28 +1,30 @@
+from __future__ import print_function
 import os
 import select
 import shutil
 import subprocess
 import sys
-import StringIO
 import tempfile
 from xmodem import *
 
 def run(modem='XMODEM'):
-    print 'Testing', modem.upper(), 'modem'
+    print('Testing', modem.upper(), 'modem')
 
     fn = None
     if modem.lower().startswith('xmodem'):
         fd, fn = tempfile.mkstemp()
         flag   = '--xmodem'
-        print 'Calling rz %s %s' % (flag, fn)
+        print('Calling rz %s %s' % (flag, fn))
         pipe   = subprocess.Popen(['rz', '--errors', '1200', '-p', flag, fn],
+                     bufsize=0,
                      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         si, so = (pipe.stdin, pipe.stdout)
 
     elif modem.lower() == 'ymodem':
         flag   = '--ymodem'
-        print 'Calling rz %s' % (flag,)
+        print('Calling rz %s' % (flag,))
         pipe   = subprocess.Popen(['rz', '--errors', '1200', '-p', flag],
+                     bufsize=0,
                      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         si, so = (pipe.stdin, pipe.stdout)
 
@@ -33,7 +35,7 @@ def run(modem='XMODEM'):
         else:
             data = None
 
-        print 'getc(', repr(data), ')'
+        print('getc(', repr(data), ')')
         return data
 
     def putc(data, timeout=3):
@@ -45,13 +47,13 @@ def run(modem='XMODEM'):
         else:
             size = None
 
-        print 'putc(', repr(data), repr(size), ')'
+        print('putc(', repr(data), repr(size), ')')
         return size
 
     if modem.lower().startswith('xmodem'):
         stream = open(__file__, 'rb')
         xmodem = globals()[modem.upper()](getc, putc)
-        print 'Modem instance', xmodem
+        print('Modem instance', xmodem)
         status = xmodem.send(stream, retry=8)
         stream.close()
 
@@ -59,11 +61,12 @@ def run(modem='XMODEM'):
         fd, fn = tempfile.mkstemp()
         shutil.copy(__file__, fn)
         ymodem = YMODEM(getc, putc)
-        print 'Modem instance', ymodem
+        print('Modem instance', ymodem)
         status = ymodem.send(fn, retry=8)
 
-    print >> sys.stderr, 'sent', status
-    print >> sys.stderr, file(fn).read()
+    sys.stdout.flush()
+    print('sent', status, file=sys.stderr)
+    print(open(fn).read(), file=sys.stderr)
 
     if fn: os.unlink(fn)
 

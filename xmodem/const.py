@@ -1,11 +1,11 @@
 # Protocol bytes
-SOH = chr(0x01)
-STX = chr(0x02)
-EOT = chr(0x04)
-ACK = chr(0x06)
-NAK = chr(0x15)
-CAN = chr(0x18)
-CRC = chr(0x43)
+SOH = chr(0x01).encode()
+STX = chr(0x02).encode()
+EOT = chr(0x04).encode()
+ACK = chr(0x06).encode()
+NAK = chr(0x15).encode()
+CAN = chr(0x18).encode()
+CRC = chr(0x43).encode()
 
 # Protocol types
 PROTOCOL_XMODEM    = 0x00

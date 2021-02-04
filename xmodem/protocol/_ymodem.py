@@ -1,8 +1,10 @@
 import glob
 import os
+from xmodem import error
 from xmodem.const import *
 from xmodem.tools import log
 from xmodem.protocol._xmodem import XMODEM
+from xmodem.protocol._xmodem import ord2
 
 
 class YMODEM(XMODEM):
@@ -22,7 +24,7 @@ class YMODEM(XMODEM):
 
     def __init__(self, getc, putc):
         XMODEM.__init__(self,getc,putc)
-        self.VERSION=PROTOCOL_YMODEM
+        self.protocol=PROTOCOL_YMODEM
 
     def send(self, pattern, retry=16, timeout=60):
         '''
@@ -56,14 +58,14 @@ class YMODEM(XMODEM):
             sequence = 0
             error_count = 0
             # REQUIREMENT 1,1a,1b,1c,1d
-            data = ''.join([os.path.basename(filename), '\x00'])
+            data = b''.join([os.path.basename(filename).encode(), b'\x00'])
 
             log.debug(error.DEBUG_START_FILE % (filename,))
             # Pick a suitable packet length for the filename
             packet_size = 128 if (len(data) < 128) else 1024
 
             # Packet padding
-            data = data.ljust(packet_size, '\0')
+            data = data.ljust(packet_size, b'\0')
 
             # Calculate checksum
             crc = self.calc_crc(data) if crc_mode else self.calc_checksum(data)
@@ -108,7 +110,7 @@ class YMODEM(XMODEM):
         sequence = 0
         error_count = 0
         packet_size= 128
-        data = '\x00' * packet_size
+        data = b'\x00' * packet_size
         crc = self.calc_crc(data) if crc_mode else self.calc_checksum(data)
 
         # Emit packet
@@ -180,26 +182,29 @@ class YMODEM(XMODEM):
         while True:
             # Read next file in batch mode
             while True:
+                if error_count >= retry:
+                    self.abort(timeout=timeout)
+                    return num_files or None
                 if char is None:
                     error_count += 1
                 elif char == CAN:
                     if cancel:
                         log.error(error.ABORT_RECV_CAN_CAN)
-                        return None
+                        return num_files or None
                     else:
                         log.debug(debug.DEBUG_RECV_CAN)
                         cancel = 1
                         continue
                 elif char in [SOH, STX]:
-                    seq1 = ord(self.getc(1))
-                    seq2 = 0xff - ord(self.getc(1))
+                    seq1 = ord2(self.getc(1))
+                    seq2 = 0xff - ord2(self.getc(1))
 
                     if seq1 == sequence and seq2 == sequence:
                         packet_size = 128 if char == SOH else 1024
                         data = self.getc(packet_size + 1 + crc_mode)
                         data = self._check_crc(data, crc_mode)
                         if data:
-                            filename = data.split('\x00')[0]
+                            filename = data.split(b'\x00')[0].decode()
                             if not filename:
                                 # No filename, end of batch reception
                                 self.putc(ACK)
@@ -234,15 +239,41 @@ class YMODEM(XMODEM):
             stream_size = self._recv_stream(fileout, crc_mode, retry, timeout,
                 delay)
 
-            if not stream_size:
+            if not stream_size and stream_size != 0:
                 log.error(error.ABORT_RECV_STREAM)
-                return False
+                return num_files or False
 
             log.debug('File transfer done, requesting next')
             fileout.close()
             num_files += 1
             sequence = 0
+            error_count = 0
 
             # Ask for the next sequence and receive the reply
-            self.putc(CRC)
-            char = self.getc(1, timeout) 
+            self.putc(CRC if crc_mode else NAK)
+            while True:
+                if error_count >= retry:
+                    self.abort(timeout=timeout)
+                    break
+
+                # <CRC> or <NAK> sent, waiting answer
+                char = self.getc(1, timeout)
+                if char is None:
+                    error_count += 1
+                    self.putc(CRC if crc_mode else NAK)
+                    continue
+                elif char == EOT:
+                    self.putc(ACK)
+                elif char == CAN:
+                    if cancel:
+                        log.error(error.ABORT_RECV_CAN_CAN)
+                        return num_files or None
+                    else:
+                        log.debug(error.DEBUG_RECV_CAN)
+                        cancel = 1
+                        continue
+                elif char in [SOH, STX]:
+                    break
+                else:
+                    #error_count += 1
+                    continue
